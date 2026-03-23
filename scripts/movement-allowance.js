@@ -365,6 +365,15 @@ class MoveBudgetPanel extends foundry.applications.api.ApplicationV2 {
 
     return wrap;
   }
+
+  /**
+   * @param {HTMLElement} result
+   * @param {HTMLElement} content
+   * @param {object} _options
+   */
+  _replaceHTML(result, content, _options) {
+    content.replaceChildren(result);
+  }
 }
 
 // --- Hooks ----------------------------------------------------------------
