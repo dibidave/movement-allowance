@@ -617,24 +617,35 @@ Hooks.once("ready", () => {
       return;
     }
 
-    const sampleItem = root.querySelector(".sheet-tabs .item, nav.tabs .item");
-    const tabGroup = sampleItem?.dataset?.group ?? "main";
+    // ApplicationV2 TokenConfig: match native tab `data-group`, nav markup (`button` vs `a`), and panel
+    // parent. Tabs are bound before this hook; unknown groups or wrong containers leave the panel hidden.
+    const refPanel = root.querySelector(".tab[data-tab][data-group], .tab[data-tab]");
+    const tabGroup = refPanel?.dataset?.group ?? root.querySelector("nav.tabs")?.dataset?.group ?? "primary";
 
     const tabNav =
-      root.querySelector(`.sheet-tabs[data-group="${tabGroup}"]`) ??
-      root.querySelector(".sheet-tabs") ??
-      root.querySelector("nav.tabs");
+      (tabGroup && root.querySelector(`nav.tabs[data-group="${CSS.escape(tabGroup)}"]`)) ||
+      root.querySelector("nav.tabs") ||
+      root.querySelector(".sheet-tabs[data-group]") ||
+      root.querySelector(".sheet-tabs");
 
-    const tabButton = document.createElement("a");
-    tabButton.className = "item";
+    const tabHost = refPanel?.parentElement;
+    if (!tabNav || !tabHost) return;
+
+    const refNavItem = tabNav?.querySelector("[data-tab]");
+    const navTag = refNavItem?.tagName === "BUTTON" ? "button" : "a";
+    const tabButton = document.createElement(navTag);
+    if (navTag === "button") tabButton.type = "button";
+    tabButton.className = refNavItem?.className?.length ? refNavItem.className : "item";
     tabButton.dataset.tab = TOKEN_CONFIG_TAB;
     tabButton.dataset.group = tabGroup;
-    tabButton.textContent = localize("TabMovement");
+    tabButton.innerHTML = `<i class="fas fa-person-running" aria-hidden="true"></i><span class="label">${localize("TabMovement")}</span>`;
 
-    const tabBody = document.createElement("div");
-    tabBody.className = "tab";
+    const tabBody = document.createElement(refPanel?.tagName?.toLowerCase() === "section" ? "section" : "div");
+    tabBody.className = refPanel?.className?.length ? refPanel.className : "tab";
+    if (!tabBody.classList.contains("tab")) tabBody.classList.add("tab");
     tabBody.dataset.tab = TOKEN_CONFIG_TAB;
     tabBody.dataset.group = tabGroup;
+    tabBody.setAttribute("hidden", "");
     tabBody.innerHTML = `
       <div class="form-group">
         <label for="${maxInputId}">${localize("OverrideLabel")}</label>
@@ -650,14 +661,41 @@ Hooks.once("ready", () => {
       </div>
     `;
 
-    if (tabNav && !tabNav.querySelector(`[data-tab="${TOKEN_CONFIG_TAB}"]`)) tabNav.appendChild(tabButton);
+    if (!tabNav.querySelector(`[data-tab="${TOKEN_CONFIG_TAB}"]`)) tabNav.appendChild(tabButton);
 
-    const tabHost =
-      root.querySelector(".sheet-body") ??
-      root.querySelector("section.window-content") ??
-      root.querySelector("form") ??
-      root;
     if (!tabHost.querySelector(`.tab[data-tab="${TOKEN_CONFIG_TAB}"]`)) tabHost.appendChild(tabBody);
+
+    // TokenConfig binds ApplicationV2 tabs before this hook; our tab id is not in the app manifest, so we
+    // toggle this panel (and nav .active) ourselves after click. Foundry still handles native tabs.
+    if (!tabNav.dataset.movementAllowanceTabSync) {
+      tabNav.dataset.movementAllowanceTabSync = "1";
+      const groupSel = CSS.escape(tabGroup);
+      tabNav.addEventListener("click", (ev) => {
+        const t = ev.target.closest("[data-tab]");
+        if (!t || !tabNav.contains(t)) return;
+        const id = t.dataset.tab;
+        queueMicrotask(() => {
+          if (id === TOKEN_CONFIG_TAB) {
+            tabNav.querySelectorAll("[data-tab]").forEach((el) => el.classList.remove("active"));
+            t.classList.add("active");
+            tabHost.querySelectorAll(`.tab[data-group="${groupSel}"]`).forEach((p) => {
+              const on = p.dataset.tab === TOKEN_CONFIG_TAB;
+              p.classList.toggle("active", on);
+              if (on) p.removeAttribute("hidden");
+              else p.setAttribute("hidden", "");
+            });
+          } else {
+            tabButton.classList.remove("active");
+            tabBody.classList.remove("active");
+            tabBody.setAttribute("hidden", "");
+            const nativePanel = tabHost.querySelector(
+              `.tab[data-group="${groupSel}"][data-tab="${CSS.escape(id)}"]`
+            );
+            if (nativePanel) nativePanel.removeAttribute("hidden");
+          }
+        });
+      });
+    }
 
     const form = root.querySelector("form");
     if (form && !form.dataset.movementAllowanceSubmitBound) {

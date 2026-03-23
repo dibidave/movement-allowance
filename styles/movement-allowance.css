@@ -48,3 +48,10 @@
   font-size: var(--font-size-12, 0.85em);
   opacity: 0.85;
 }
+
+/* TokenConfig (ApplicationV2): allowance tab nav item */
+nav.tabs [data-tab="movement-allowance"] .fas,
+.sheet-tabs [data-tab="movement-allowance"] .fas {
+  margin-inline-end: 0.35em;
+  opacity: 0.9;
+}
