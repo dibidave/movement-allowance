@@ -716,11 +716,17 @@ Hooks.once("ready", () => {
     if (!tabNav.dataset.movementAllowanceTabSync) {
       tabNav.dataset.movementAllowanceTabSync = "1";
       const groupSel = CSS.escape(tabGroup);
+      // Foundry's ApplicationV2 tab handling is async (`changeTab`). `queueMicrotask` runs before that
+      // work finishes, so visibility can fight core and leave a native tab blank until the next tab change.
+      // Defer with setTimeout(0) and coalesce rapid clicks so only the last intended tab wins.
+      let tabSyncGeneration = 0;
       tabNav.addEventListener("click", (ev) => {
         const t = ev.target.closest("[data-tab]");
         if (!t || !tabNav.contains(t)) return;
         const id = t.dataset.tab;
-        queueMicrotask(() => {
+        const gen = ++tabSyncGeneration;
+        setTimeout(() => {
+          if (gen !== tabSyncGeneration) return;
           if (id === TOKEN_CONFIG_TAB) {
             tabNav.querySelectorAll("[data-tab]").forEach((el) => el.classList.remove("active"));
             t.classList.add("active");
@@ -739,7 +745,7 @@ Hooks.once("ready", () => {
             );
             if (nativePanel) nativePanel.removeAttribute("hidden");
           }
-        });
+        }, 0);
       });
     }
 
