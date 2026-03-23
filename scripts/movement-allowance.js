@@ -137,6 +137,65 @@ function trackableBarEntryKey(entry) {
 }
 
 /**
+ * @param {unknown} entry
+ * @returns {string[]}
+ */
+function barEntryToSegments(entry) {
+  if (Array.isArray(entry) && entry.length && entry.every((x) => typeof x === "string")) return entry;
+  if (typeof entry === "string" && entry.length) return entry.split(".");
+  return [];
+}
+
+const ALLOWANCE_BAR_MAX_DOT = ALLOWANCE_BAR_SEGMENTS_MAX.join(".");
+const ALLOWANCE_BAR_CURRENT_DOT = ALLOWANCE_BAR_SEGMENTS_CURRENT.join(".");
+
+/**
+ * Dedupe bar rows, coerce to segment arrays, drop standalone allowance max (max is supplied via
+ * `getBarAttribute` when the bar uses allowanceCurrent). Optionally inject current once for exempt-aware
+ * `getTrackedAttributes` calls.
+ * @param {unknown[]} bar
+ * @param {{ injectAllowanceCurrent?: boolean }} [options]
+ * @returns {string[][]}
+ */
+function finalizeBarDescriptorForAllowance(bar, options = {}) {
+  const injectAllowanceCurrent = Boolean(options.injectAllowanceCurrent);
+  const out = [];
+  const seen = new Set();
+  for (const e of Array.isArray(bar) ? bar : []) {
+    const segs = barEntryToSegments(e);
+    if (!segs.length) continue;
+    const k = segs.join(".");
+    if (k === ALLOWANCE_BAR_MAX_DOT) continue;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(segs);
+  }
+  if (injectAllowanceCurrent && !seen.has(ALLOWANCE_BAR_CURRENT_DOT)) {
+    out.push([...ALLOWANCE_BAR_SEGMENTS_CURRENT]);
+    seen.add(ALLOWANCE_BAR_CURRENT_DOT);
+  }
+  return out;
+}
+
+/**
+ * @param {unknown[]} value
+ * @returns {unknown[]}
+ */
+function dedupeTrackableValueEntries(value) {
+  if (!Array.isArray(value)) return value;
+  const out = [];
+  const seen = new Set();
+  for (const e of value) {
+    const segs = barEntryToSegments(e);
+    const k = segs.length ? segs.join(".") : trackableBarEntryKey(e);
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    out.push(segs.length ? segs : e);
+  }
+  return out;
+}
+
+/**
  * Infer actor document type from the first argument to `TokenDocument.getTrackedAttributes`.
  * @param {unknown} data
  * @returns {string|null}
@@ -176,22 +235,29 @@ function installTokenDocumentAllowanceIntegration() {
     const origTracked = TD.getTrackedAttributes;
     TD.getTrackedAttributes = function movementAllowanceGetTrackedAttributes(data, path) {
       const desc = origTracked.call(TD, data, path);
-      const type = resolveActorTypeForTrackedData(data);
-      if (type && !shouldInjectAllowanceTrackablePathsForType(type)) return desc;
       if (!desc || typeof desc !== "object") return desc;
-      const bar = Array.isArray(desc.bar) ? [...desc.bar] : [];
-      const keys = new Set(bar.map((e) => trackableBarEntryKey(e)));
-      const curKey = trackableBarEntryKey(ALLOWANCE_BAR_SEGMENTS_CURRENT);
-      const maxKey = trackableBarEntryKey(ALLOWANCE_BAR_SEGMENTS_MAX);
-      if (curKey && !keys.has(curKey)) {
-        bar.push([...ALLOWANCE_BAR_SEGMENTS_CURRENT]);
-        keys.add(curKey);
-      }
-      if (maxKey && !keys.has(maxKey)) {
-        bar.push([...ALLOWANCE_BAR_SEGMENTS_MAX]);
-        keys.add(maxKey);
-      }
+      const type = resolveActorTypeForTrackedData(data);
+      const inject =
+        !type || shouldInjectAllowanceTrackablePathsForType(type);
+      const bar = finalizeBarDescriptorForAllowance(Array.isArray(desc.bar) ? desc.bar : [], {
+        injectAllowanceCurrent: inject,
+      });
       return { ...desc, bar };
+    };
+  }
+
+  if (!TD.__movementAllowanceChoicesPatched) {
+    TD.__movementAllowanceChoicesPatched = true;
+    const origChoices = TD.getTrackedAttributeChoices;
+    TD.getTrackedAttributeChoices = function movementAllowanceGetTrackedAttributeChoices(attributes) {
+      if (!attributes || typeof attributes !== "object") return origChoices.call(TD, attributes);
+      const bar = finalizeBarDescriptorForAllowance(Array.isArray(attributes.bar) ? attributes.bar : [], {
+        injectAllowanceCurrent: false,
+      });
+      const value = dedupeTrackableValueEntries(
+        Array.isArray(attributes.value) ? attributes.value : []
+      );
+      return origChoices.call(TD, { ...attributes, bar, value });
     };
   }
 
@@ -346,7 +412,7 @@ class MovementAllowancePanel extends foundry.applications.api.ApplicationV2 {
       resizable: false,
       title: "MOVEMENT_ALLOWANCE.PanelTitle",
     },
-    position: { width: 300, height: "auto" },
+    position: { width: 150, height: "auto" },
   };
 
   static async onToggleEnabled() {
