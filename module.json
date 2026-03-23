@@ -1,7 +1,7 @@
 {
   "id": "movement-allowance",
   "title": "Movement Allowance",
-  "description": "Per-turn movement budgets for tokens (MoveBudget): enforce limits, GM reset, and optional token resource bars. Foundry v13+.",
+  "description": "Per-turn movement allowance for tokens: enforce limits, GM controls, end-turn reset, optional resource bars. Foundry v13+.",
   "version": "#{VERSION}#",
   "url": "#{URL}#",
   "manifest": "#{MANIFEST}#",

@@ -1,23 +1,25 @@
 /**
- * MoveBudget — per-turn movement limits (Foundry v13+).
- * Flags on actors: scope "move-budget" (moveBudgetMax, moveBudgetCurrent, exempt).
+ * Movement Allowance — per-turn movement limits (Foundry v13+).
+ * Actor flags: scope = module id (`movement-allowance`). Keys: allowanceMax, allowanceCurrent, allowanceExempt.
  */
 
 const MODULE_ID = "movement-allowance";
-const FLAG_SCOPE = "move-budget";
-const FLAG_MAX = "moveBudgetMax";
-const FLAG_CURRENT = "moveBudgetCurrent";
-const FLAG_EXEMPT = "exempt";
-const ATTR_BAR_CURRENT = "flags.move-budget.moveBudgetCurrent";
+const FLAG_SCOPE = MODULE_ID;
+const FLAG_MAX = "allowanceMax";
+const FLAG_CURRENT = "allowanceCurrent";
+const FLAG_EXEMPT = "allowanceExempt";
+const ATTR_BAR_CURRENT = `flags.${MODULE_ID}.allowanceCurrent`;
 const SETTING_KEYS = {
   enabled: "enabled",
   gmMove: "gmMove",
-  defaultMoveBudget: "defaultMoveBudget",
+  defaultAllowance: "defaultAllowance",
   scope: "scope",
   exemptActorTypes: "exemptActorTypes",
   resetScope: "resetScope",
   barVisibility: "barVisibility",
 };
+
+const TOKEN_CONFIG_TAB = "movement-allowance";
 
 /** @type {Map<string, number>} actor id → reserved distance not yet written to flags */
 const reservedMovement = new Map();
@@ -25,21 +27,20 @@ const reservedMovement = new Map();
 const actorUpdateChains = new Map();
 
 function localize(key) {
-  return game.i18n.localize(`MOVEBUDGET.${key}`);
+  return game.i18n.localize(`MOVEMENT_ALLOWANCE.${key}`);
 }
 
 function localizeSetting(key) {
-  return game.i18n.localize(`MOVEBUDGET.Settings.${key}`);
+  return game.i18n.localize(`MOVEMENT_ALLOWANCE.Settings.${key}`);
 }
 
 function getEffectiveMax(actor) {
   const override = actor.getFlag(FLAG_SCOPE, FLAG_MAX);
   if (typeof override === "number" && !Number.isNaN(override)) return override;
-  return game.settings.get(MODULE_ID, SETTING_KEYS.defaultMoveBudget);
+  return game.settings.get(MODULE_ID, SETTING_KEYS.defaultAllowance);
 }
 
 /**
- * Flag value for current budget, without in-flight reservations (for display / reset).
  * @param {Actor} actor
  */
 function getFlagCurrent(actor) {
@@ -50,7 +51,6 @@ function getFlagCurrent(actor) {
 }
 
 /**
- * Remaining budget for enforcement (accounts for moves approved but not yet persisted).
  * @param {Actor} actor
  */
 function getEffectiveRemaining(actor) {
@@ -84,15 +84,16 @@ function shouldEnforceToken(token, initiatingUser) {
 /**
  * @param {TokenDocument} token
  */
-function tokenUsesMoveBudgetBar(token) {
+function tokenUsesAllowanceBar(token) {
   const a1 = token.bar1?.attribute ?? "";
   const a2 = token.bar2?.attribute ?? "";
-  return a1.includes("move-budget.moveBudgetCurrent") || a2.includes("move-budget.moveBudgetCurrent");
+  const path = `${MODULE_ID}.allowanceCurrent`;
+  return a1.includes(path) || a2.includes(path);
 }
 
 function syncBarVisibilityForToken(token) {
   if (!game.user.isGM) return;
-  if (!tokenUsesMoveBudgetBar(token)) return;
+  if (!tokenUsesAllowanceBar(token)) return;
   const vis = game.settings.get(MODULE_ID, SETTING_KEYS.barVisibility);
   const mode = vis === "all" ? CONST.TOKEN_DISPLAY_MODES.ALWAYS : CONST.TOKEN_DISPLAY_MODES.OWNER;
   if (token.displayBars === mode) return;
@@ -108,7 +109,7 @@ async function applyBarVisibilityGlobally() {
   }
 }
 
-const MOVE_BUDGET_BAR_PAIR = [ATTR_BAR_CURRENT, "flags.move-budget.moveBudgetMax"];
+const ALLOWANCE_BAR_PAIR = [ATTR_BAR_CURRENT, `flags.${MODULE_ID}.allowanceMax`];
 
 function actorTypesFromSystem() {
   const raw = game.system?.documentTypes?.Actor;
@@ -132,13 +133,12 @@ function normalizeTrackableEntry(entry) {
 
 /**
  * V13 expects CONFIG.Actor.trackableAttributes[actorType].bar to be an array.
- * Systems may omit `bar`; TokenConfig then throws when building the Resources tab.
  */
-function mergeMoveBudgetTrackableAttributes() {
+function mergeAllowanceTrackableAttributes() {
   if (!CONFIG.Actor.trackableAttributes) CONFIG.Actor.trackableAttributes = {};
   const ta = CONFIG.Actor.trackableAttributes;
   const types = actorTypesFromSystem();
-  const pair = MOVE_BUDGET_BAR_PAIR;
+  const pair = ALLOWANCE_BAR_PAIR;
 
   const hasPair = (bar) => bar.some((row) => row && row[0] === pair[0]);
 
@@ -204,7 +204,7 @@ function measureMovementDistance(tokenDoc, movement) {
     const result = grid.measurePath(waypoints);
     return Math.max(0, Number(result?.distance) || 0);
   } catch (err) {
-    console.warn("MoveBudget: measurePath failed", err);
+    console.warn("MovementAllowance: measurePath failed", err);
     return 0;
   }
 }
@@ -213,7 +213,7 @@ function measureMovementDistance(tokenDoc, movement) {
  * @param {Actor} actor
  * @param {number} distance
  */
-function enqueueBudgetDeduction(actor, distance) {
+function enqueueAllowanceDeduction(actor, distance) {
   reservedMovement.set(actor.id, (reservedMovement.get(actor.id) ?? 0) + distance);
 
   const prev = actorUpdateChains.get(actor.id) ?? Promise.resolve();
@@ -231,7 +231,7 @@ function enqueueBudgetDeduction(actor, distance) {
       }
     })
     .catch((err) => {
-      console.error("MoveBudget: failed to persist budget", err);
+      console.error("MovementAllowance: failed to persist allowance", err);
       const left = (reservedMovement.get(actor.id) ?? 0) - distance;
       reservedMovement.set(actor.id, Math.max(0, left));
     });
@@ -261,7 +261,7 @@ function allPlaceableTokenDocuments() {
   return out;
 }
 
-async function resetAllMovementBudgets() {
+async function resetAllAllowances() {
   if (!game.user?.isGM) return;
   const scope = game.settings.get(MODULE_ID, SETTING_KEYS.resetScope);
   const tokens = scope === "world" ? allPlaceableTokenDocuments() : canvas.scene?.tokens?.contents ?? [];
@@ -273,8 +273,8 @@ async function resetAllMovementBudgets() {
   }
 }
 
-function refreshMoveBudgetPanel() {
-  if (game.moveBudgetPanel?.rendered) game.moveBudgetPanel.render();
+function refreshAllowancePanel() {
+  if (game.movementAllowancePanel?.rendered) game.movementAllowancePanel.render();
 }
 
 function onBarVisibilityChange() {
@@ -283,16 +283,16 @@ function onBarVisibilityChange() {
 
 // --- ApplicationV2 panel -------------------------------------------------
 
-class MoveBudgetPanel extends foundry.applications.api.ApplicationV2 {
+class MovementAllowancePanel extends foundry.applications.api.ApplicationV2 {
   static DEFAULT_OPTIONS = {
-    id: "move-budget-panel",
+    id: "movement-allowance-panel",
     tag: "div",
-    classes: ["move-budget-panel"],
+    classes: ["movement-allowance-panel"],
     window: {
       frame: true,
       positioned: true,
       resizable: false,
-      title: "MOVEBUDGET.PanelTitle",
+      title: "MOVEMENT_ALLOWANCE.PanelTitle",
     },
     position: { width: 300, height: "auto" },
   };
@@ -300,19 +300,19 @@ class MoveBudgetPanel extends foundry.applications.api.ApplicationV2 {
   static async onToggleEnabled() {
     const cur = game.settings.get(MODULE_ID, SETTING_KEYS.enabled);
     await game.settings.set(MODULE_ID, SETTING_KEYS.enabled, !cur);
-    refreshMoveBudgetPanel();
+    refreshAllowancePanel();
   }
 
   static async onToggleGmMove() {
     const cur = game.settings.get(MODULE_ID, SETTING_KEYS.gmMove);
     await game.settings.set(MODULE_ID, SETTING_KEYS.gmMove, !cur);
-    refreshMoveBudgetPanel();
+    refreshAllowancePanel();
   }
 
   static async onResetAll() {
-    await resetAllMovementBudgets();
+    await resetAllAllowances();
     ui.notifications?.info(localize("EndTurnDone"));
-    refreshMoveBudgetPanel();
+    refreshAllowancePanel();
   }
 
   /**
@@ -322,9 +322,9 @@ class MoveBudgetPanel extends foundry.applications.api.ApplicationV2 {
     const btn = event.target.closest("[data-action]");
     if (!btn || !this.element.contains(btn)) return;
     const action = btn.dataset.action;
-    if (action === "toggleEnabled") void MoveBudgetPanel.onToggleEnabled();
-    else if (action === "toggleGmMove") void MoveBudgetPanel.onToggleGmMove();
-    else if (action === "resetAll") void MoveBudgetPanel.onResetAll();
+    if (action === "toggleEnabled") void MovementAllowancePanel.onToggleEnabled();
+    else if (action === "toggleGmMove") void MovementAllowancePanel.onToggleGmMove();
+    else if (action === "resetAll") void MovementAllowancePanel.onResetAll();
   };
 
   _onFirstRender(context, options) {
@@ -343,21 +343,21 @@ class MoveBudgetPanel extends foundry.applications.api.ApplicationV2 {
     const gmMove = game.settings.get(MODULE_ID, SETTING_KEYS.gmMove);
 
     const wrap = document.createElement("div");
-    wrap.className = "move-budget-panel-inner standard-form";
+    wrap.className = "movement-allowance-panel-inner standard-form";
 
     wrap.innerHTML = `
       <div class="form-group">
-        <button type="button" class="move-budget-btn move-budget-btn-enabled ${enabled ? "is-on" : "is-off"}" data-action="toggleEnabled">
+        <button type="button" class="movement-allowance-btn movement-allowance-btn-enabled ${enabled ? "is-on" : "is-off"}" data-action="toggleEnabled">
           ${enabled ? localize("ToggleEnabled") : localize("ToggleEnabledOff")}
         </button>
       </div>
       <div class="form-group">
-        <button type="button" class="move-budget-btn move-budget-btn-gmmove ${gmMove ? "is-active" : ""}" data-action="toggleGmMove">
+        <button type="button" class="movement-allowance-btn movement-allowance-btn-gmmove ${gmMove ? "is-active" : ""}" data-action="toggleGmMove">
           ${localize("ToggleGmMove")}
         </button>
       </div>
       <div class="form-group">
-        <button type="button" class="move-budget-btn move-budget-btn-reset" data-action="resetAll">
+        <button type="button" class="movement-allowance-btn movement-allowance-btn-reset" data-action="resetAll">
           ${localize("EndTurn")}
         </button>
       </div>
@@ -386,7 +386,7 @@ Hooks.once("init", () => {
     config: false,
     type: Boolean,
     default: false,
-    onChange: () => refreshMoveBudgetPanel(),
+    onChange: () => refreshAllowancePanel(),
   });
 
   game.settings.register(MODULE_ID, SETTING_KEYS.gmMove, {
@@ -396,12 +396,12 @@ Hooks.once("init", () => {
     config: false,
     type: Boolean,
     default: false,
-    onChange: () => refreshMoveBudgetPanel(),
+    onChange: () => refreshAllowancePanel(),
   });
 
-  game.settings.register(MODULE_ID, SETTING_KEYS.defaultMoveBudget, {
-    name: localizeSetting("defaultMoveBudgetName"),
-    hint: localizeSetting("defaultMoveBudgetHint"),
+  game.settings.register(MODULE_ID, SETTING_KEYS.defaultAllowance, {
+    name: localizeSetting("defaultAllowanceName"),
+    hint: localizeSetting("defaultAllowanceHint"),
     scope: "world",
     config: true,
     type: Number,
@@ -467,19 +467,19 @@ Hooks.once("init", () => {
     if (!tokenControl?.tools) return;
 
     const toolDef = {
-      name: "moveBudgetPanel",
+      name: "movementAllowancePanel",
       order: 55,
-      title: game.i18n.localize("MOVEBUDGET.SceneControlTitle"),
+      title: game.i18n.localize("MOVEMENT_ALLOWANCE.SceneControlTitle"),
       icon: "fas fa-person-running",
       button: true,
       visible: true,
       onChange: () => {
-        game.moveBudgetPanel?.render({ force: true });
+        game.movementAllowancePanel?.render({ force: true });
       },
     };
 
     if (Array.isArray(tokenControl.tools)) tokenControl.tools.push(toolDef);
-    else tokenControl.tools.moveBudgetPanel = toolDef;
+    else tokenControl.tools.movementAllowancePanel = toolDef;
   });
 
   Hooks.on("preMoveToken", (tokenDoc, movement, _operation) => {
@@ -495,16 +495,19 @@ Hooks.once("init", () => {
     const remaining = getEffectiveRemaining(actor);
     if (dist > remaining) return false;
 
-    enqueueBudgetDeduction(actor, dist);
+    enqueueAllowanceDeduction(actor, dist);
   });
 });
 
 Hooks.once("setup", () => {
-  mergeMoveBudgetTrackableAttributes();
+  mergeAllowanceTrackableAttributes();
 });
 
 Hooks.once("ready", () => {
-  game.moveBudgetPanel = new MoveBudgetPanel();
+  game.movementAllowancePanel = new MovementAllowancePanel();
+
+  const maxInputId = "movement-allowance-max";
+  const exemptInputId = "movement-allowance-exempt";
 
   Hooks.on("renderTokenConfig", (app, html) => {
     if (!game.user.isGM) return;
@@ -523,8 +526,8 @@ Hooks.once("ready", () => {
       const t = app.document ?? app.object;
       const act = t?.actor;
       if (!act) return;
-      const maxInput = root.querySelector("#move-budget-max");
-      const exInput = root.querySelector("#move-budget-exempt");
+      const maxInput = root.querySelector(`#${maxInputId}`);
+      const exInput = root.querySelector(`#${exemptInputId}`);
       const raw = maxInput?.value?.trim() ?? "";
       if (raw === "") await act.unsetFlag(FLAG_SCOPE, FLAG_MAX);
       else {
@@ -534,12 +537,12 @@ Hooks.once("ready", () => {
       await act.setFlag(FLAG_SCOPE, FLAG_EXEMPT, Boolean(exInput?.checked));
     };
 
-    app._moveBudgetSaveFlags = saveFlags;
+    app._movementAllowanceSaveFlags = saveFlags;
 
-    const existingMax = root.querySelector("#move-budget-max");
+    const existingMax = root.querySelector(`#${maxInputId}`);
     if (existingMax) {
       existingMax.value = typeof maxVal === "number" ? String(maxVal) : "";
-      const exEl = root.querySelector("#move-budget-exempt");
+      const exEl = root.querySelector(`#${exemptInputId}`);
       if (exEl) exEl.checked = exempt;
       return;
     }
@@ -554,41 +557,41 @@ Hooks.once("ready", () => {
 
     const tabButton = document.createElement("a");
     tabButton.className = "item";
-    tabButton.dataset.tab = "move-budget";
+    tabButton.dataset.tab = TOKEN_CONFIG_TAB;
     tabButton.dataset.group = tabGroup;
     tabButton.textContent = localize("TabMovement");
 
     const tabBody = document.createElement("div");
     tabBody.className = "tab";
-    tabBody.dataset.tab = "move-budget";
+    tabBody.dataset.tab = TOKEN_CONFIG_TAB;
     tabBody.dataset.group = tabGroup;
     tabBody.innerHTML = `
       <div class="form-group">
-        <label for="move-budget-max">${localize("OverrideLabel")}</label>
-        <input type="number" name="move-budget-max" id="move-budget-max" min="0" step="1"
+        <label for="${maxInputId}">${localize("OverrideLabel")}</label>
+        <input type="number" name="${maxInputId}" id="${maxInputId}" min="0" step="1"
           value="${typeof maxVal === "number" ? maxVal : ""}" placeholder="" />
         <p class="hint">${localize("OverrideHint")}</p>
       </div>
       <div class="form-group">
         <label class="checkbox">
-          <input type="checkbox" name="move-budget-exempt" id="move-budget-exempt" ${exempt ? "checked" : ""} />
+          <input type="checkbox" name="${exemptInputId}" id="${exemptInputId}" ${exempt ? "checked" : ""} />
           ${localize("ExemptLabel")}
         </label>
       </div>
     `;
 
-    if (tabNav && !tabNav.querySelector('[data-tab="move-budget"]')) tabNav.appendChild(tabButton);
+    if (tabNav && !tabNav.querySelector(`[data-tab="${TOKEN_CONFIG_TAB}"]`)) tabNav.appendChild(tabButton);
 
     const tabHost =
       root.querySelector(".sheet-body") ??
       root.querySelector("section.window-content") ??
       root.querySelector("form") ??
       root;
-    if (!tabHost.querySelector('.tab[data-tab="move-budget"]')) tabHost.appendChild(tabBody);
+    if (!tabHost.querySelector(`.tab[data-tab="${TOKEN_CONFIG_TAB}"]`)) tabHost.appendChild(tabBody);
 
     const form = root.querySelector("form");
-    if (form && !form.dataset.moveBudgetSubmitBound) {
-      form.dataset.moveBudgetSubmitBound = "1";
+    if (form && !form.dataset.movementAllowanceSubmitBound) {
+      form.dataset.movementAllowanceSubmitBound = "1";
       form.addEventListener(
         "submit",
         () => {
@@ -601,7 +604,7 @@ Hooks.once("ready", () => {
 
   Hooks.on("closeTokenConfig", (app) => {
     if (!game.user.isGM) return;
-    if (typeof app._moveBudgetSaveFlags === "function") void app._moveBudgetSaveFlags();
+    if (typeof app._movementAllowanceSaveFlags === "function") void app._movementAllowanceSaveFlags();
   });
 
   Hooks.on("renderSettingsConfig", (_app, html) => {
@@ -624,15 +627,15 @@ Hooks.once("ready", () => {
       )?.closest("section");
 
     const mount = section ?? root.querySelector("#settings-menu") ?? root;
-    if (mount.querySelector(".move-budget-exempt-types")) return;
+    if (mount.querySelector(".movement-allowance-exempt-types")) return;
 
     const current = new Set(game.settings.get(MODULE_ID, SETTING_KEYS.exemptActorTypes) ?? []);
 
     const wrap = document.createElement("div");
-    wrap.className = "form-group subgroup move-budget-exempt-types";
+    wrap.className = "form-group subgroup movement-allowance-exempt-types";
     wrap.innerHTML = `<label>${localizeSetting("exemptTypesName")}</label>
       <p class="notes">${localizeSetting("exemptTypesHint")}</p>
-      <select multiple class="move-budget-exempt-select" size="${Math.min(types.length, 8)}"></select>`;
+      <select multiple class="movement-allowance-exempt-select" size="${Math.min(types.length, 8)}"></select>`;
 
     const sel = wrap.querySelector("select");
     for (const t of types) {
