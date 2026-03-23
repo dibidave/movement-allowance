@@ -109,132 +109,80 @@ async function applyBarVisibilityGlobally() {
   }
 }
 
-/**
- * In V13, `CONFIG.Actor.trackableAttributes[type].bar` is a **flat** list of dot-path strings (see dnd5e
- * and core TokenConfig). Core does `attr.split(".")` on **each** `bar` element. Nesting a pair as
- * `[[current, max]]` makes the first element an Array → `attr.split is not a function`. Register current
- * and max as two separate strings; users pick the current path for the bar (max is the sibling flag).
- */
+/** Max flag path (for bar attribute matching); current is `ATTR_BAR_CURRENT` at top of file. */
 const ATTR_BAR_MAX = `flags.${MODULE_ID}.allowanceMax`;
 
 /**
- * @param {unknown} pathlike
+ * Infer actor document type from the first argument to `TokenDocument.getTrackedAttributes`.
+ * @param {unknown} data
  * @returns {string|null}
  */
-function pathToDotString(pathlike) {
-  if (typeof pathlike === "string") return pathlike;
-  if (Array.isArray(pathlike) && pathlike.every((x) => typeof x === "string")) return pathlike.join(".");
+function resolveActorTypeForTrackedData(data) {
+  if (typeof data === "string" && data.length > 0) return data;
+  const models = CONFIG.Actor?.dataModels;
+  if (!data || typeof data !== "object" || !models) return null;
+  for (const [type, Model] of Object.entries(models)) {
+    try {
+      if (Model && data instanceof Model) return type;
+    } catch {
+      /* instanceof can throw for cross-realm prototypes */
+    }
+  }
   return null;
 }
 
-/**
- * @param {unknown} row
- * @returns {[string, string]|null}
- */
-function normalizeBarRowToStringPair(row) {
-  if (!Array.isArray(row) || row.length !== 2) return null;
-  const a = pathToDotString(row[0]);
-  const b = pathToDotString(row[1]);
-  if (!a || !b) return null;
-  return [a, b];
+function shouldInjectAllowanceTrackablePathsForType(type) {
+  if (!type) return true;
+  const exempt = game.settings.get(MODULE_ID, SETTING_KEYS.exemptActorTypes) ?? [];
+  if (!Array.isArray(exempt) || exempt.length === 0) return true;
+  return !exempt.includes(type);
 }
 
 /**
- * Normalize `bar` to a flat `string[]` of dot paths so `_getConfiguredTrackedAttributes` never sees a
- * non-string element.
- * @param {unknown[]} bar
- * @returns {string[]}
+ * Do not assign `CONFIG.Actor.trackableAttributes[actorType]` for systems that rely on DataModels only:
+ * core then skips schema-derived trackables and the Resources tab only lists CONFIG entries (see core
+ * discussion around trackables + TypeDataModel). Append allowance paths on the merged result instead,
+ * and resolve bar values for module flags in `getBarAttribute`.
  */
-function flattenBarToDotStrings(bar) {
-  if (!Array.isArray(bar)) return [];
-  const out = [];
-  for (const row of bar) {
-    if (typeof row === "string") {
-      out.push(row);
-      continue;
-    }
-    const pair = normalizeBarRowToStringPair(row);
-    if (pair) {
-      out.push(pair[0], pair[1]);
-      continue;
-    }
-    const single = pathToDotString(row);
-    if (single) out.push(single);
-  }
-  return out;
-}
+function installTokenDocumentAllowanceIntegration() {
+  const TD = foundry.documents.TokenDocument;
 
-function hasAllowanceBarPaths(bar) {
-  return (
-    Array.isArray(bar) && bar.includes(ATTR_BAR_CURRENT) && bar.includes(ATTR_BAR_MAX)
-  );
-}
-
-/**
- * @param {unknown[]} value
- * @returns {string[]}
- */
-function normalizeValueToDotStrings(value) {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((v) => pathToDotString(v))
-    .filter((s) => typeof s === "string" && s.length > 0);
-}
-
-function actorTypesFromSystem() {
-  const raw = game.system?.documentTypes?.Actor;
-  if (Array.isArray(raw)) return [...raw];
-  if (raw && typeof raw === "object") return Object.keys(raw);
-  const models = CONFIG.Actor?.dataModels;
-  if (models && typeof models === "object") return Object.keys(models);
-  return [];
-}
-
-/**
- * @param {object} entry
- */
-function normalizeTrackableEntry(entry) {
-  if (!entry || typeof entry !== "object") return { bar: [], value: [] };
-  return {
-    bar: Array.isArray(entry.bar) ? entry.bar : [],
-    value: Array.isArray(entry.value) ? entry.value : [],
-  };
-}
-
-/**
- * Merge allowance paths into CONFIG.Actor.trackableAttributes[actorType] as flat dot strings in `bar`.
- */
-function mergeAllowanceTrackableAttributes() {
-  if (!CONFIG.Actor.trackableAttributes) CONFIG.Actor.trackableAttributes = {};
-  const ta = CONFIG.Actor.trackableAttributes;
-  const types = actorTypesFromSystem();
-
-  const ensureEntry = (type) => {
-    let raw = ta[type];
-    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-      raw = { bar: [], value: [] };
-    }
-    const norm = normalizeTrackableEntry(raw);
-    const entry = {
-      bar: flattenBarToDotStrings(norm.bar),
-      value: normalizeValueToDotStrings(norm.value),
+  if (!TD.__movementAllowanceTrackedPatched) {
+    TD.__movementAllowanceTrackedPatched = true;
+    const origTracked = TD.getTrackedAttributes;
+    TD.getTrackedAttributes = function movementAllowanceGetTrackedAttributes(data, path) {
+      const desc = origTracked.call(TD, data, path);
+      const type = resolveActorTypeForTrackedData(data);
+      if (type && !shouldInjectAllowanceTrackablePathsForType(type)) return desc;
+      if (!desc || typeof desc !== "object") return desc;
+      const bar = Array.isArray(desc.bar) ? [...desc.bar] : [];
+      if (!bar.includes(ATTR_BAR_CURRENT)) bar.push(ATTR_BAR_CURRENT);
+      if (!bar.includes(ATTR_BAR_MAX)) bar.push(ATTR_BAR_MAX);
+      return { ...desc, bar };
     };
-    if (!hasAllowanceBarPaths(entry.bar)) {
-      entry.bar.push(ATTR_BAR_CURRENT, ATTR_BAR_MAX);
-    }
-    ta[type] = entry;
-  };
-
-  if (types.length) {
-    for (const type of types) ensureEntry(type);
-    return;
   }
 
-  for (const key of Object.keys(ta)) {
-    const val = ta[key];
-    if (!val || typeof val !== "object" || Array.isArray(val)) continue;
-    if (!("bar" in val) && !("value" in val)) continue;
-    ensureEntry(key);
+  const proto = TD.prototype;
+  if (!proto.__movementAllowanceBarPatched) {
+    proto.__movementAllowanceBarPatched = true;
+    const origBar = proto.getBarAttribute;
+    proto.getBarAttribute = function movementAllowanceGetBarAttribute(barName, options) {
+      const opts = options ?? {};
+      const spec = this[barName];
+      const path = typeof opts.alternative === "string" ? opts.alternative : spec?.attribute;
+      if (typeof path === "string" && path === ATTR_BAR_CURRENT) {
+        const actor = this.actor;
+        if (actor) {
+          return {
+            type: "bar",
+            attribute: path,
+            value: getFlagCurrent(actor),
+            max: getEffectiveMax(actor),
+          };
+        }
+      }
+      return origBar.call(this, barName, options);
+    };
   }
 }
 
@@ -567,13 +515,11 @@ Hooks.once("init", () => {
 
     enqueueAllowanceDeduction(actor, dist);
   });
+
+  installTokenDocumentAllowanceIntegration();
 });
 
 Hooks.once("ready", () => {
-  // After all `setup` hooks: system has merged `CONFIG.Actor.trackableAttributes`. Merging earlier can
-  // create empty `{ bar: [], value: [] }` shells that block system registration and confuse TokenConfig.
-  mergeAllowanceTrackableAttributes();
-
   game.movementAllowancePanel = new MovementAllowancePanel();
 
   const maxInputId = "movement-allowance-max";

@@ -83,7 +83,7 @@ Both `allowanceMax` and `allowanceCurrent` are stored as flags on the **Actor do
 
 Register movement allowance as a token attribute by surfacing it as a `value`/`max` pair in the Actor's registered attributes. This makes it available natively in Foundry's token resource bar system with no custom bar rendering code required.
 
-In **V13**, `CONFIG.Actor.trackableAttributes[actorType].bar` is a **flat array of dot-path strings** (same shape as dnd5e: e.g. `"attributes.hp"`). Core calls `.split(".")` on **each** element of `bar`. Do **not** push a nested pair as `[[current, max]]` — the inner array is not a string, so TokenConfig throws `attr.split is not a function`. This module registers `flags.movement-allowance.allowanceCurrent` and `…allowanceMax` as **two separate strings** in `bar`, and flattens any legacy `[current, max]` pairs from the system when merging.
+In **V13**, do **not** populate `CONFIG.Actor.trackableAttributes` with synthetic per-type entries when the game system relies on **DataModel / schema** for trackables: if that object exists for a type, core can omit schema-derived attributes from the Token Config **Resources** list (only CONFIG paths appear). This module instead **patches** `TokenDocument.getTrackedAttributes` to append `flags.movement-allowance.allowanceCurrent` and `…allowanceMax` to the **merged** descriptor after core runs, and **patches** `TokenDocument.prototype.getBarAttribute` so choosing the **current** path resolves `value` / `max` from module flags (core does not always resolve module flag bars for previews or the HUD).
 
 **What this provides for free:**
 
