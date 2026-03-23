@@ -550,11 +550,11 @@ Hooks.once("init", () => {
   });
 });
 
-Hooks.once("setup", () => {
-  mergeAllowanceTrackableAttributes();
-});
-
 Hooks.once("ready", () => {
+  // After all `setup` hooks: system has merged `CONFIG.Actor.trackableAttributes`. Merging earlier can
+  // create empty `{ bar: [], value: [] }` shells that block system registration and confuse TokenConfig.
+  mergeAllowanceTrackableAttributes();
+
   game.movementAllowancePanel = new MovementAllowancePanel();
 
   const maxInputId = "movement-allowance-max";
