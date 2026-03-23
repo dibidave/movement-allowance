@@ -1,14 +1,14 @@
 {
   "id": "movement-allowance",
   "title": "Movement Allowance",
-  "description": "Skeleton module — verifies load with an on-screen message.",
+  "description": "Per-turn movement budgets for tokens (MoveBudget): enforce limits, GM reset, and optional token resource bars. Foundry v13+.",
   "version": "#{VERSION}#",
   "url": "#{URL}#",
   "manifest": "#{MANIFEST}#",
   "download": "#{DOWNLOAD}#",
   "compatibility": {
-    "minimum": "11",
-    "verified": "12"
+    "minimum": "13",
+    "verified": "13"
   },
   "authors": [
     {

@@ -1,1 +1,50 @@
-/* movement-allowance module styles */
+/* MoveBudget GM panel */
+.application.move-budget-panel .window-content {
+  padding: 0.5rem 0.75rem;
+}
+
+.move-budget-panel-inner .form-group {
+  margin-bottom: 0.65rem;
+}
+
+.move-budget-btn {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  font-weight: 600;
+  border-radius: 4px;
+  border: 1px solid var(--color-border-light-primary, #444);
+  cursor: pointer;
+}
+
+.move-budget-btn-enabled.is-on {
+  background: var(--color-warm-1, #2d5a2d);
+  color: #fff;
+  border-color: transparent;
+}
+
+.move-budget-btn-enabled.is-off {
+  background: var(--color-cool-5, #5a2d2d);
+  color: #fff;
+  border-color: transparent;
+}
+
+.move-budget-btn-gmmove.is-active {
+  background: var(--color-warm-3, #8a6a1a);
+  color: #fff;
+  border-color: transparent;
+}
+
+.move-budget-btn-reset {
+  background: var(--color-cool-3, #333);
+  color: var(--color-text-light-highlight, #eee);
+}
+
+.move-budget-exempt-select {
+  width: 100%;
+  min-height: 4rem;
+}
+
+.tab[data-tab="move-budget"] .hint {
+  font-size: var(--font-size-12, 0.85em);
+  opacity: 0.85;
+}
