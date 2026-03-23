@@ -1,0 +1,31 @@
+{
+  "id": "movement-allowance",
+  "title": "Movement Allowance",
+  "description": "Skeleton module — verifies load with an on-screen message.",
+  "version": "#{VERSION}#",
+  "url": "#{URL}#",
+  "manifest": "#{MANIFEST}#",
+  "download": "#{DOWNLOAD}#",
+  "compatibility": {
+    "minimum": "11",
+    "verified": "12"
+  },
+  "authors": [
+    {
+      "name": "Developer"
+    }
+  ],
+  "scripts": [
+    "scripts/movement-allowance.js"
+  ],
+  "styles": [
+    "styles/movement-allowance.css"
+  ],
+  "languages": [
+    {
+      "lang": "en",
+      "name": "English",
+      "path": "languages/en.json"
+    }
+  ]
+}

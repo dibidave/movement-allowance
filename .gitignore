@@ -1,0 +1,56 @@
+# OS
+.DS_Store
+.DS_Store?
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Editor / IDE
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# VS Code — often commit extensions.json only; rest stays local
+.vscode/*
+!.vscode/extensions.json
+
+# Secrets and local env
+.env
+.env.*
+!.env.example
+
+# Node (if you add a build or tooling later)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Python (utility scripts, Foundry CLI, etc.)
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.Python
+
+# Build / coverage
+dist/
+build/
+coverage/
+.nyc_output/
+
+# Logs and temp
+*.log
+*.tmp
+*.temp
+.cache/
+
+# Local packaging (release zips come from GitHub Releases, not the repo)
+*.zip

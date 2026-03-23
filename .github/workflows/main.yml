@@ -1,0 +1,62 @@
+# GitHub Actions workflow for Foundry VTT module releases.
+# Based on https://github.com/League-of-Foundry-Developers/FoundryVTT-Module-Template
+#
+# Publish a GitHub Release (with a tag like v0.0.1 or 0.0.1) to generate
+# module.json and module.zip for Foundry’s “Install Module” manifest URL.
+
+name: Create Module Files For GitHub Release
+
+env:
+  project_url: "https://github.com/${{ github.repository }}"
+  latest_manifest_url: "https://github.com/${{ github.repository }}/releases/latest/download/module.json"
+  release_module_url: "https://github.com/${{ github.repository }}/releases/download/${{ github.event.release.tag_name }}/module.zip"
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Extract Version From Tag
+        id: get_version
+        uses: battila7/get-version-action@v2
+
+      - name: Modify Module Manifest With Release-Specific Values
+        uses: cschleiden/replace-tokens@v1
+        with:
+          files: "module.json"
+        env:
+          VERSION: ${{ steps.get_version.outputs.version-without-v }}
+          URL: ${{ env.project_url }}
+          MANIFEST: ${{ env.latest_manifest_url }}
+          DOWNLOAD: ${{ env.release_module_url }}
+
+      - name: Create Module Archive
+        run: |
+          zip --recurse-paths ./module.zip \
+            module.json \
+            README.md \
+            LICENSE \
+            scripts/ \
+            styles/ \
+            languages/
+
+      - name: Update Release With Files
+        uses: ncipollo/release-action@v1
+        with:
+          allowUpdates: true
+          name: ${{ github.event.release.name }}
+          draft: ${{ github.event.release.unpublished }}
+          prerelease: ${{ github.event.release.prerelease }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          artifacts: "./module.json,./module.zip"
+          tag: ${{ github.event.release.tag_name }}
+          body: ${{ github.event.release.body }}
