@@ -109,7 +109,48 @@ async function applyBarVisibilityGlobally() {
   }
 }
 
-const ALLOWANCE_BAR_PAIR = [ATTR_BAR_CURRENT, `flags.${MODULE_ID}.allowanceMax`];
+/**
+ * V13 `TrackedAttributesDescription.bar` entries are `[valuePath, maxPath]` where each path is
+ * an array of string segments (not a single dot-separated string), or core calls `.split` on the wrong type.
+ */
+const ALLOWANCE_BAR_PATHS = [
+  ["flags", MODULE_ID, "allowanceCurrent"],
+  ["flags", MODULE_ID, "allowanceMax"],
+];
+
+function dotPathToSegments(path) {
+  if (typeof path !== "string") return null;
+  return path.split(".").filter(Boolean);
+}
+
+/**
+ * @param {unknown} row
+ * @returns {[string[], string[]]|null}
+ */
+function normalizeBarRow(row) {
+  if (!Array.isArray(row) || row.length !== 2) return null;
+  const [a, b] = row;
+  let segs0;
+  let segs1;
+  if (typeof a === "string") segs0 = dotPathToSegments(a);
+  else if (Array.isArray(a) && a.every((x) => typeof x === "string")) segs0 = a;
+  else return null;
+  if (typeof b === "string") segs1 = dotPathToSegments(b);
+  else if (Array.isArray(b) && b.every((x) => typeof x === "string")) segs1 = b;
+  else return null;
+  return [segs0, segs1];
+}
+
+function barPathsEqual(a, b) {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function hasAllowanceBarRow(bar) {
+  return bar.some((row) => {
+    const n = normalizeBarRow(row);
+    return n && barPathsEqual(n, ALLOWANCE_BAR_PATHS);
+  });
+}
 
 function actorTypesFromSystem() {
   const raw = game.system?.documentTypes?.Actor;
@@ -132,15 +173,12 @@ function normalizeTrackableEntry(entry) {
 }
 
 /**
- * V13 expects CONFIG.Actor.trackableAttributes[actorType].bar to be an array.
+ * V13 expects CONFIG.Actor.trackableAttributes[actorType].bar rows as segment-array pairs.
  */
 function mergeAllowanceTrackableAttributes() {
   if (!CONFIG.Actor.trackableAttributes) CONFIG.Actor.trackableAttributes = {};
   const ta = CONFIG.Actor.trackableAttributes;
   const types = actorTypesFromSystem();
-  const pair = ALLOWANCE_BAR_PAIR;
-
-  const hasPair = (bar) => bar.some((row) => row && row[0] === pair[0]);
 
   const ensureEntry = (type) => {
     let entry = ta[type];
@@ -152,7 +190,10 @@ function mergeAllowanceTrackableAttributes() {
       ta[type] = { ...entry, bar: norm.bar, value: norm.value };
       entry = ta[type];
     }
-    if (!hasPair(entry.bar)) entry.bar.push(pair);
+    entry.bar = entry.bar.map((row) => normalizeBarRow(row) ?? row);
+    if (!hasAllowanceBarRow(entry.bar)) {
+      entry.bar.push(ALLOWANCE_BAR_PATHS.map((segments) => [...segments]));
+    }
   };
 
   if (types.length) {
