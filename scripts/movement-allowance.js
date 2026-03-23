@@ -714,6 +714,28 @@ Hooks.once("ready", () => {
   const maxInputId = "movement-allowance-max";
   const exemptInputId = "movement-allowance-exempt";
 
+  /**
+   * ApplicationV2 TokenConfig often commits without a native `submit` event; query the live app shell and
+   * listen for `change` / `submit` on `app.element` so overrides persist (e.g. Genesys).
+   * @param {Application} app
+   * @param {() => Promise<void>} saveFlags
+   */
+  function bindMovementAllowanceTokenConfigPersistence(app, saveFlags) {
+    const el = app.element;
+    if (!(el instanceof HTMLElement) || el.dataset.movementAllowancePersistenceBound) return;
+    el.dataset.movementAllowancePersistenceBound = "1";
+    const run = () => void saveFlags();
+    el.addEventListener(
+      "change",
+      (ev) => {
+        const id = ev.target?.id;
+        if (id === maxInputId || id === exemptInputId) run();
+      },
+      true
+    );
+    el.addEventListener("submit", run, true);
+  }
+
   Hooks.on("renderTokenConfig", (app, html) => {
     if (!game.user.isGM) return;
     const token = app.document ?? app.object;
@@ -731,8 +753,9 @@ Hooks.once("ready", () => {
       const t = app.document ?? app.object;
       const act = t?.actor;
       if (!act) return;
-      const maxInput = root.querySelector(`#${maxInputId}`);
-      const exInput = root.querySelector(`#${exemptInputId}`);
+      const shell = app.element instanceof HTMLElement ? app.element : root;
+      const maxInput = shell.querySelector(`#${maxInputId}`);
+      const exInput = shell.querySelector(`#${exemptInputId}`);
       const raw = maxInput?.value?.trim() ?? "";
       if (raw === "") await act.unsetFlag(FLAG_SCOPE, FLAG_MAX);
       else {
@@ -740,6 +763,7 @@ Hooks.once("ready", () => {
         if (!Number.isNaN(n)) await act.setFlag(FLAG_SCOPE, FLAG_MAX, n);
       }
       await act.setFlag(FLAG_SCOPE, FLAG_EXEMPT, Boolean(exInput?.checked));
+      canvas?.tokens?.get(t.id)?.refresh?.();
     };
 
     app._movementAllowanceSaveFlags = saveFlags;
@@ -749,6 +773,7 @@ Hooks.once("ready", () => {
       existingMax.value = typeof maxVal === "number" ? String(maxVal) : "";
       const exEl = root.querySelector(`#${exemptInputId}`);
       if (exEl) exEl.checked = exempt;
+      bindMovementAllowanceTokenConfigPersistence(app, saveFlags);
       return;
     }
 
@@ -841,19 +866,15 @@ Hooks.once("ready", () => {
     const form = root.querySelector("form");
     if (form && !form.dataset.movementAllowanceSubmitBound) {
       form.dataset.movementAllowanceSubmitBound = "1";
-      form.addEventListener(
-        "submit",
-        () => {
-          void saveFlags();
-        },
-        { capture: true }
-      );
+      form.addEventListener("submit", () => void saveFlags(), { capture: true });
     }
+
+    bindMovementAllowanceTokenConfigPersistence(app, saveFlags);
   });
 
-  Hooks.on("closeTokenConfig", (app) => {
+  Hooks.on("closeTokenConfig", async (app) => {
     if (!game.user.isGM) return;
-    if (typeof app._movementAllowanceSaveFlags === "function") void app._movementAllowanceSaveFlags();
+    if (typeof app._movementAllowanceSaveFlags === "function") await app._movementAllowanceSaveFlags();
   });
 
   Hooks.on("renderSettingsConfig", (_app, html) => {
