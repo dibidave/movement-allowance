@@ -83,7 +83,7 @@ Both `allowanceMax` and `allowanceCurrent` are stored as flags on the **Actor do
 
 Register movement allowance as a token attribute by surfacing it as a `value`/`max` pair in the Actor's registered attributes. This makes it available natively in Foundry's token resource bar system with no custom bar rendering code required.
 
-In **V13**, each entry in `CONFIG.Actor.trackableAttributes[actorType].bar` must be a **pair of path segment arrays** (each path is `string[]`, e.g. `["flags", "movement-allowance", "allowanceCurrent"]`), not a pair of dot-separated strings. Core iterates these paths in a way that calls `.split` only on strings; passing `["flags.a.b", "flags.a.c"]` breaks TokenConfig with `attr.split is not a function`.
+In **V13**, each row in `CONFIG.Actor.trackableAttributes[actorType].bar` must be a **pair of dot-separated path strings** (e.g. `flags.movement-allowance.allowanceCurrent` and `…allowanceMax`). Core calls `.split(".")` on each path; if a row uses segment **arrays** instead of strings, TokenConfig throws `attr.split is not a function`. The module normalizes any segment-array rows it finds back to strings when merging.
 
 **What this provides for free:**
 
