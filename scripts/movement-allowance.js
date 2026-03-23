@@ -108,6 +108,66 @@ async function applyBarVisibilityGlobally() {
   }
 }
 
+const MOVE_BUDGET_BAR_PAIR = [ATTR_BAR_CURRENT, "flags.move-budget.moveBudgetMax"];
+
+function actorTypesFromSystem() {
+  const raw = game.system?.documentTypes?.Actor;
+  if (Array.isArray(raw)) return [...raw];
+  if (raw && typeof raw === "object") return Object.keys(raw);
+  const models = CONFIG.Actor?.dataModels;
+  if (models && typeof models === "object") return Object.keys(models);
+  return [];
+}
+
+/**
+ * @param {object} entry
+ */
+function normalizeTrackableEntry(entry) {
+  if (!entry || typeof entry !== "object") return { bar: [], value: [] };
+  return {
+    bar: Array.isArray(entry.bar) ? entry.bar : [],
+    value: Array.isArray(entry.value) ? entry.value : [],
+  };
+}
+
+/**
+ * V13 expects CONFIG.Actor.trackableAttributes[actorType].bar to be an array.
+ * Systems may omit `bar`; TokenConfig then throws when building the Resources tab.
+ */
+function mergeMoveBudgetTrackableAttributes() {
+  if (!CONFIG.Actor.trackableAttributes) CONFIG.Actor.trackableAttributes = {};
+  const ta = CONFIG.Actor.trackableAttributes;
+  const types = actorTypesFromSystem();
+  const pair = MOVE_BUDGET_BAR_PAIR;
+
+  const hasPair = (bar) => bar.some((row) => row && row[0] === pair[0]);
+
+  const ensureEntry = (type) => {
+    let entry = ta[type];
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      entry = { bar: [], value: [] };
+      ta[type] = entry;
+    } else {
+      const norm = normalizeTrackableEntry(entry);
+      ta[type] = { ...entry, bar: norm.bar, value: norm.value };
+      entry = ta[type];
+    }
+    if (!hasPair(entry.bar)) entry.bar.push(pair);
+  };
+
+  if (types.length) {
+    for (const type of types) ensureEntry(type);
+    return;
+  }
+
+  for (const key of Object.keys(ta)) {
+    const val = ta[key];
+    if (!val || typeof val !== "object" || Array.isArray(val)) continue;
+    if (!("bar" in val) && !("value" in val)) continue;
+    ensureEntry(key);
+  }
+}
+
 /**
  * @param {TokenDocument} tokenDoc
  * @param {object} movement
@@ -251,7 +311,7 @@ class MoveBudgetPanel extends foundry.applications.api.ApplicationV2 {
 
   static async onResetAll() {
     await resetAllMovementBudgets();
-    ui.notifications?.info(localize("ResetDone"));
+    ui.notifications?.info(localize("EndTurnDone"));
     refreshMoveBudgetPanel();
   }
 
@@ -298,7 +358,7 @@ class MoveBudgetPanel extends foundry.applications.api.ApplicationV2 {
       </div>
       <div class="form-group">
         <button type="button" class="move-budget-btn move-budget-btn-reset" data-action="resetAll">
-          ${localize("ResetAll")}
+          ${localize("EndTurn")}
         </button>
       </div>
     `;
@@ -314,7 +374,7 @@ Hooks.once("init", () => {
     name: localizeSetting("enabledName"),
     hint: localizeSetting("enabledHint"),
     scope: "world",
-    config: true,
+    config: false,
     type: Boolean,
     default: false,
     onChange: () => refreshMoveBudgetPanel(),
@@ -324,7 +384,7 @@ Hooks.once("init", () => {
     name: localizeSetting("gmMoveName"),
     hint: localizeSetting("gmMoveHint"),
     scope: "world",
-    config: true,
+    config: false,
     type: Boolean,
     default: false,
     onChange: () => refreshMoveBudgetPanel(),
@@ -389,11 +449,6 @@ Hooks.once("init", () => {
     onChange: () => onBarVisibilityChange(),
   });
 
-  if (!CONFIG.Actor.trackableAttributes) CONFIG.Actor.trackableAttributes = { bar: [], value: [] };
-  const ta = CONFIG.Actor.trackableAttributes;
-  if (!ta.bar) ta.bar = [];
-  ta.bar.push([ATTR_BAR_CURRENT, "flags.move-budget.moveBudgetMax"]);
-
   Hooks.on("getSceneControlButtons", (controls) => {
     if (!game.user?.isGM) return;
     let tokenControl = controls?.tokens ?? controls?.token;
@@ -409,7 +464,7 @@ Hooks.once("init", () => {
       icon: "fas fa-person-running",
       button: true,
       visible: true,
-      onClick: () => {
+      onChange: () => {
         game.moveBudgetPanel?.render({ force: true });
       },
     };
@@ -433,6 +488,10 @@ Hooks.once("init", () => {
 
     enqueueBudgetDeduction(actor, dist);
   });
+});
+
+Hooks.once("setup", () => {
+  mergeMoveBudgetTrackableAttributes();
 });
 
 Hooks.once("ready", () => {

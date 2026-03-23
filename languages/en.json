@@ -5,6 +5,8 @@
     "ToggleEnabled": "Module on",
     "ToggleEnabledOff": "Module off",
     "ToggleGmMove": "GM move (no cost)",
+    "EndTurn": "End turn",
+    "EndTurnDone": "Turn ended — movement allowances restored.",
     "ResetAll": "Reset all movement",
     "ResetDone": "Movement budgets reset.",
     "TabMovement": "Movement",
