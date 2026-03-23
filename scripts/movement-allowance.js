@@ -110,11 +110,12 @@ async function applyBarVisibilityGlobally() {
 }
 
 /**
- * TokenConfig / `_getConfiguredTrackedAttributes` calls `.split(".")` on each bar path — paths must be
- * dot-separated strings, not segment arrays (arrays would throw `attr.split is not a function`).
+ * In V13, `CONFIG.Actor.trackableAttributes[type].bar` is a **flat** list of dot-path strings (see dnd5e
+ * and core TokenConfig). Core does `attr.split(".")` on **each** `bar` element. Nesting a pair as
+ * `[[current, max]]` makes the first element an Array → `attr.split is not a function`. Register current
+ * and max as two separate strings; users pick the current path for the bar (max is the sibling flag).
  */
 const ATTR_BAR_MAX = `flags.${MODULE_ID}.allowanceMax`;
-const ALLOWANCE_BAR_PAIR = [ATTR_BAR_CURRENT, ATTR_BAR_MAX];
 
 /**
  * @param {unknown} pathlike
@@ -138,28 +139,46 @@ function normalizeBarRowToStringPair(row) {
   return [a, b];
 }
 
-function hasAllowanceBarPair(bar) {
-  return bar.some((row) => {
-    const n = normalizeBarRowToStringPair(row);
-    return n && n[0] === ALLOWANCE_BAR_PAIR[0] && n[1] === ALLOWANCE_BAR_PAIR[1];
-  });
+/**
+ * Normalize `bar` to a flat `string[]` of dot paths so `_getConfiguredTrackedAttributes` never sees a
+ * non-string element.
+ * @param {unknown[]} bar
+ * @returns {string[]}
+ */
+function flattenBarToDotStrings(bar) {
+  if (!Array.isArray(bar)) return [];
+  const out = [];
+  for (const row of bar) {
+    if (typeof row === "string") {
+      out.push(row);
+      continue;
+    }
+    const pair = normalizeBarRowToStringPair(row);
+    if (pair) {
+      out.push(pair[0], pair[1]);
+      continue;
+    }
+    const single = pathToDotString(row);
+    if (single) out.push(single);
+  }
+  return out;
+}
+
+function hasAllowanceBarPaths(bar) {
+  return (
+    Array.isArray(bar) && bar.includes(ATTR_BAR_CURRENT) && bar.includes(ATTR_BAR_MAX)
+  );
 }
 
 /**
- * Coerce any segment-array paths in `bar` / `value` to strings so core's `.split` is safe.
- * @param {{ bar?: unknown[]; value?: unknown[] }} entry
+ * @param {unknown[]} value
+ * @returns {string[]}
  */
-function sanitizeTrackableAttributePaths(entry) {
-  if (!entry || typeof entry !== "object") return;
-  if (Array.isArray(entry.bar)) {
-    entry.bar = entry.bar.map((row) => {
-      const pair = normalizeBarRowToStringPair(row);
-      return pair ?? row;
-    });
-  }
-  if (Array.isArray(entry.value)) {
-    entry.value = entry.value.map((v) => pathToDotString(v) ?? v);
-  }
+function normalizeValueToDotStrings(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((v) => pathToDotString(v))
+    .filter((s) => typeof s === "string" && s.length > 0);
 }
 
 function actorTypesFromSystem() {
@@ -183,7 +202,7 @@ function normalizeTrackableEntry(entry) {
 }
 
 /**
- * Merge allowance bar into CONFIG.Actor.trackableAttributes[actorType] using string path pairs.
+ * Merge allowance paths into CONFIG.Actor.trackableAttributes[actorType] as flat dot strings in `bar`.
  */
 function mergeAllowanceTrackableAttributes() {
   if (!CONFIG.Actor.trackableAttributes) CONFIG.Actor.trackableAttributes = {};
@@ -191,19 +210,19 @@ function mergeAllowanceTrackableAttributes() {
   const types = actorTypesFromSystem();
 
   const ensureEntry = (type) => {
-    let entry = ta[type];
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-      entry = { bar: [], value: [] };
-      ta[type] = entry;
-    } else {
-      const norm = normalizeTrackableEntry(entry);
-      ta[type] = { ...entry, bar: norm.bar, value: norm.value };
-      entry = ta[type];
+    let raw = ta[type];
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      raw = { bar: [], value: [] };
     }
-    sanitizeTrackableAttributePaths(entry);
-    if (!hasAllowanceBarPair(entry.bar)) {
-      entry.bar.push([ALLOWANCE_BAR_PAIR[0], ALLOWANCE_BAR_PAIR[1]]);
+    const norm = normalizeTrackableEntry(raw);
+    const entry = {
+      bar: flattenBarToDotStrings(norm.bar),
+      value: normalizeValueToDotStrings(norm.value),
+    };
+    if (!hasAllowanceBarPaths(entry.bar)) {
+      entry.bar.push(ATTR_BAR_CURRENT, ATTR_BAR_MAX);
     }
+    ta[type] = entry;
   };
 
   if (types.length) {
