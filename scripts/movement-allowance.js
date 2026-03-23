@@ -85,8 +85,9 @@ function shouldEnforceToken(token, initiatingUser) {
  * @param {TokenDocument} token
  */
 function tokenUsesAllowanceBar(token) {
-  const a1 = token.bar1?.attribute ?? "";
-  const a2 = token.bar2?.attribute ?? "";
+  const toStr = (a) => trackablePathToDotString(a) ?? "";
+  const a1 = toStr(token.bar1?.attribute);
+  const a2 = toStr(token.bar2?.attribute);
   const path = `${MODULE_ID}.allowanceCurrent`;
   return a1.includes(path) || a2.includes(path);
 }
@@ -111,6 +112,29 @@ async function applyBarVisibilityGlobally() {
 
 /** Max flag path (for bar attribute matching); current is `ATTR_BAR_CURRENT` at top of file. */
 const ATTR_BAR_MAX = `flags.${MODULE_ID}.allowanceMax`;
+
+/** Segment arrays for `getTrackedAttributes` / `getTrackedAttributeChoices` (core maps with `v.join(".")`). */
+const ALLOWANCE_BAR_SEGMENTS_CURRENT = ["flags", MODULE_ID, FLAG_CURRENT];
+const ALLOWANCE_BAR_SEGMENTS_MAX = ["flags", MODULE_ID, FLAG_MAX];
+
+/**
+ * @param {unknown} pathlike
+ * @returns {string|null}
+ */
+function trackablePathToDotString(pathlike) {
+  if (typeof pathlike === "string") return pathlike;
+  if (Array.isArray(pathlike) && pathlike.every((x) => typeof x === "string")) return pathlike.join(".");
+  return null;
+}
+
+/**
+ * @param {unknown} entry bar row from getTrackedAttributes (segment[] or legacy dot string)
+ * @returns {string}
+ */
+function trackableBarEntryKey(entry) {
+  const s = trackablePathToDotString(entry);
+  return s ?? "";
+}
 
 /**
  * Infer actor document type from the first argument to `TokenDocument.getTrackedAttributes`.
@@ -156,8 +180,17 @@ function installTokenDocumentAllowanceIntegration() {
       if (type && !shouldInjectAllowanceTrackablePathsForType(type)) return desc;
       if (!desc || typeof desc !== "object") return desc;
       const bar = Array.isArray(desc.bar) ? [...desc.bar] : [];
-      if (!bar.includes(ATTR_BAR_CURRENT)) bar.push(ATTR_BAR_CURRENT);
-      if (!bar.includes(ATTR_BAR_MAX)) bar.push(ATTR_BAR_MAX);
+      const keys = new Set(bar.map((e) => trackableBarEntryKey(e)));
+      const curKey = trackableBarEntryKey(ALLOWANCE_BAR_SEGMENTS_CURRENT);
+      const maxKey = trackableBarEntryKey(ALLOWANCE_BAR_SEGMENTS_MAX);
+      if (curKey && !keys.has(curKey)) {
+        bar.push([...ALLOWANCE_BAR_SEGMENTS_CURRENT]);
+        keys.add(curKey);
+      }
+      if (maxKey && !keys.has(maxKey)) {
+        bar.push([...ALLOWANCE_BAR_SEGMENTS_MAX]);
+        keys.add(maxKey);
+      }
       return { ...desc, bar };
     };
   }
@@ -169,13 +202,14 @@ function installTokenDocumentAllowanceIntegration() {
     proto.getBarAttribute = function movementAllowanceGetBarAttribute(barName, options) {
       const opts = options ?? {};
       const spec = this[barName];
-      const path = typeof opts.alternative === "string" ? opts.alternative : spec?.attribute;
-      if (typeof path === "string" && path === ATTR_BAR_CURRENT) {
+      const rawPath = opts.alternative !== undefined ? opts.alternative : spec?.attribute;
+      const pathDot = trackablePathToDotString(rawPath);
+      if (pathDot === ATTR_BAR_CURRENT) {
         const actor = this.actor;
         if (actor) {
           return {
             type: "bar",
-            attribute: path,
+            attribute: typeof rawPath === "string" ? rawPath : pathDot,
             value: getFlagCurrent(actor),
             max: getEffectiveMax(actor),
           };
