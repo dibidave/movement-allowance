@@ -13,6 +13,7 @@
     "OverrideLabel": "Allowance override (max per turn)",
     "OverrideHint": "Leave empty to use the world default. Units match the scene grid.",
     "ExemptLabel": "Exempt this token from allowance limits",
+    "BarResourceLabel": "Movement allowance",
     "Settings": {
       "enabledName": "Movement allowance enabled",
       "enabledHint": "When off, tokens move freely with no restrictions.",

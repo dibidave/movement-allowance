@@ -85,6 +85,8 @@ Register movement allowance as a token attribute by surfacing it as a `value`/`m
 
 In **V13**, do **not** populate `CONFIG.Actor.trackableAttributes` with synthetic per-type entries when the game system relies on **DataModel / schema** for trackables: if that object exists for a type, core can omit schema-derived attributes from the Token Config **Resources** list (only CONFIG paths appear). This module **patches** `TokenDocument.getTrackedAttributes` to append only **`allowanceCurrent`** as a **segment-array** path (`["flags","movement-allowance","allowanceCurrent"]`) — not `allowanceMax` as its own row (that duplicated entries and showed max under **Attribute Bars** instead of pairing correctly). `getBarAttribute` supplies max from flags when the bar uses the current path. `getTrackedAttributeChoices` is also patched to **dedupe** merged `bar`/`value` rows (core can concatenate several `getTrackedAttributes` results and repeat the same path). Each `bar` row must stay `string[]` so core can `.join(".")` (dot-only strings break).
 
+**Genesys** ([FVTT-Genesys](https://github.com/Mezryss/FVTT-Genesys)): `GenesysTokenDocument` returns `{ bar: [], value: [], source: tokenAttributes }` and never calls `super.getTrackedAttributes`, and builds the Resources dropdown only from `source`. The module therefore adds a synthetic `movementAllowance` entry to a **cloned** `source` object (so the system’s static `tokenAttributes` is not mutated) and wraps `CONFIG.Token.documentClass` on **ready** to merge that descriptor and to resolve the bar in `getBarAttribute` before Genesys’s implementation.
+
 **What this provides for free:**
 
 - The bar appears as an option in the Token Config Resources tab alongside HP and other system attributes.

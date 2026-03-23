@@ -21,6 +21,9 @@ const SETTING_KEYS = {
 
 const TOKEN_CONFIG_TAB = "movement-allowance";
 
+/** Genesys (FVTT-Genesys) uses `source` token attribute ids, not flag dot paths — see GenesysTokenDocument. */
+const MOVEMENT_ALLOWANCE_GENESYS_TOKEN_KEY = "movementAllowance";
+
 /** @type {Map<string, number>} actor id → reserved distance not yet written to flags */
 const reservedMovement = new Map();
 /** @type {Map<string, Promise<void>>} */
@@ -86,10 +89,17 @@ function shouldEnforceToken(token, initiatingUser) {
  */
 function tokenUsesAllowanceBar(token) {
   const toStr = (a) => trackablePathToDotString(a) ?? "";
-  const a1 = toStr(token.bar1?.attribute);
-  const a2 = toStr(token.bar2?.attribute);
+  const a1 = token.bar1?.attribute;
+  const a2 = token.bar2?.attribute;
+  const s1 = typeof a1 === "string" ? a1 : toStr(a1);
+  const s2 = typeof a2 === "string" ? a2 : toStr(a2);
   const path = `${MODULE_ID}.allowanceCurrent`;
-  return a1.includes(path) || a2.includes(path);
+  return (
+    s1.includes(path) ||
+    s2.includes(path) ||
+    a1 === MOVEMENT_ALLOWANCE_GENESYS_TOKEN_KEY ||
+    a2 === MOVEMENT_ALLOWANCE_GENESYS_TOKEN_KEY
+  );
 }
 
 function syncBarVisibilityForToken(token) {
@@ -222,6 +232,79 @@ function shouldInjectAllowanceTrackablePathsForType(type) {
 }
 
 /**
+ * Merge allowance into a `getTrackedAttributes` descriptor. Genesys returns `{ source }` and never calls
+ * `super` (Mezryss/FVTT-Genesys `GenesysTokenDocument`), so bar[] is ignored for the Resources UI.
+ * @param {object|null|undefined} desc
+ * @param {unknown} data
+ * @returns {object|null|undefined}
+ */
+function mergeAllowanceIntoTrackedDescriptor(desc, data) {
+  if (!desc || typeof desc !== "object") return desc;
+  const type = resolveActorTypeForTrackedData(data);
+  const inject = !type || shouldInjectAllowanceTrackablePathsForType(type);
+  if (!inject) return desc;
+
+  if ("source" in desc && desc.source && typeof desc.source === "object") {
+    if (desc.source[MOVEMENT_ALLOWANCE_GENESYS_TOKEN_KEY]) return desc;
+    return {
+      ...desc,
+      source: {
+        ...desc.source,
+        [MOVEMENT_ALLOWANCE_GENESYS_TOKEN_KEY]: {
+          label: localize("BarResourceLabel"),
+          isBar: true,
+          editable: true,
+          valuePath: "_movementAllowance.value",
+          maxPath: "_movementAllowance.max",
+        },
+      },
+    };
+  }
+
+  const bar = finalizeBarDescriptorForAllowance(Array.isArray(desc.bar) ? desc.bar : [], {
+    injectAllowanceCurrent: inject,
+  });
+  return { ...desc, bar };
+}
+
+/**
+ * @param {TokenDocument} tokenDoc
+ * @param {string} barName
+ * @param {object} [options]
+ * @returns {object|null}
+ */
+function tryMovementAllowanceBarAttribute(tokenDoc, barName, options) {
+  const opts = options ?? {};
+  const spec = tokenDoc[barName];
+  const rawAttr = opts.alternative !== undefined ? opts.alternative : spec?.attribute;
+  if (rawAttr === MOVEMENT_ALLOWANCE_GENESYS_TOKEN_KEY) {
+    const actor = tokenDoc.actor;
+    if (actor) {
+      return {
+        type: "bar",
+        attribute: rawAttr,
+        value: getFlagCurrent(actor),
+        max: getEffectiveMax(actor),
+        editable: true,
+      };
+    }
+  }
+  const pathDot = trackablePathToDotString(rawAttr);
+  if (pathDot === ATTR_BAR_CURRENT) {
+    const actor = tokenDoc.actor;
+    if (actor) {
+      return {
+        type: "bar",
+        attribute: typeof rawAttr === "string" ? rawAttr : pathDot,
+        value: getFlagCurrent(actor),
+        max: getEffectiveMax(actor),
+      };
+    }
+  }
+  return null;
+}
+
+/**
  * Do not assign `CONFIG.Actor.trackableAttributes[actorType]` for systems that rely on DataModels only:
  * core then skips schema-derived trackables and the Resources tab only lists CONFIG entries (see core
  * discussion around trackables + TypeDataModel). Append allowance paths on the merged result instead,
@@ -235,14 +318,7 @@ function installTokenDocumentAllowanceIntegration() {
     const origTracked = TD.getTrackedAttributes;
     TD.getTrackedAttributes = function movementAllowanceGetTrackedAttributes(data, path) {
       const desc = origTracked.call(TD, data, path);
-      if (!desc || typeof desc !== "object") return desc;
-      const type = resolveActorTypeForTrackedData(data);
-      const inject =
-        !type || shouldInjectAllowanceTrackablePathsForType(type);
-      const bar = finalizeBarDescriptorForAllowance(Array.isArray(desc.bar) ? desc.bar : [], {
-        injectAllowanceCurrent: inject,
-      });
-      return { ...desc, bar };
+      return mergeAllowanceIntoTrackedDescriptor(desc, data);
     };
   }
 
@@ -266,24 +342,35 @@ function installTokenDocumentAllowanceIntegration() {
     proto.__movementAllowanceBarPatched = true;
     const origBar = proto.getBarAttribute;
     proto.getBarAttribute = function movementAllowanceGetBarAttribute(barName, options) {
-      const opts = options ?? {};
-      const spec = this[barName];
-      const rawPath = opts.alternative !== undefined ? opts.alternative : spec?.attribute;
-      const pathDot = trackablePathToDotString(rawPath);
-      if (pathDot === ATTR_BAR_CURRENT) {
-        const actor = this.actor;
-        if (actor) {
-          return {
-            type: "bar",
-            attribute: typeof rawPath === "string" ? rawPath : pathDot,
-            value: getFlagCurrent(actor),
-            max: getEffectiveMax(actor),
-          };
-        }
-      }
+      const hit = tryMovementAllowanceBarAttribute(this, barName, options);
+      if (hit) return hit;
       return origBar.call(this, barName, options);
     };
   }
+}
+
+/**
+ * Systems that subclass `TokenDocument` and override static `getTrackedAttributes` without always calling
+ * `super` (e.g. Genesys) never hit patches on the base class. Wrap `CONFIG.Token.documentClass` on ready.
+ */
+function installActiveTokenDocumentSubclassAllowanceIntegration() {
+  const Base = foundry.documents.TokenDocument;
+  const Cls = CONFIG.Token?.documentClass;
+  if (!Cls || Cls === Base || Cls.__movementAllowanceSubclassIntegrated) return;
+  Cls.__movementAllowanceSubclassIntegrated = true;
+
+  const origStatic = Cls.getTrackedAttributes;
+  Cls.getTrackedAttributes = function movementAllowanceSubclassGetTrackedAttributes(data, path) {
+    const desc = origStatic.call(Cls, data, path);
+    return mergeAllowanceIntoTrackedDescriptor(desc, data);
+  };
+
+  const origBar = Cls.prototype.getBarAttribute;
+  Cls.prototype.getBarAttribute = function movementAllowanceSubclassGetBarAttribute(barName, options) {
+    const hit = tryMovementAllowanceBarAttribute(this, barName, options);
+    if (hit) return hit;
+    return origBar.call(this, barName, options);
+  };
 }
 
 /**
@@ -620,6 +707,8 @@ Hooks.once("init", () => {
 });
 
 Hooks.once("ready", () => {
+  installActiveTokenDocumentSubclassAllowanceIntegration();
+
   game.movementAllowancePanel = new MovementAllowancePanel();
 
   const maxInputId = "movement-allowance-max";
